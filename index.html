@@ -8,6 +8,9 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
         body {
@@ -116,8 +119,21 @@
     </div>
 
     <script>
-        // ضع هنا رابط Google Apps Script اللي نسخته من النشر
-        const API_URL = 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE'; // استبدل برابطك
+        // إعداد Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyACa3X5iWjiqCYWAkTKZimr7EyS3VZWpFQ",
+            authDomain: "dfgsdgdfg-3f8ad.firebaseapp.com",
+            databaseURL: "https://dfgsdgdfg-3f8ad-default-rtdb.firebaseio.com",
+            projectId: "dfgsdgdfg-3f8ad",
+            storageBucket: "dfgsdgdfg-3f8ad.firebasestorage.app",
+            messagingSenderId: "1041863800382",
+            appId: "1:1041863800382:web:086b88de7bde76e6f0c36f",
+            measurementId: "G-VXZQF639M2"
+        };
+
+        // تهيئة Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
 
         const form = document.getElementById('add-subscription-form');
         const submitBtn = document.getElementById('submit-btn');
@@ -142,25 +158,28 @@
             setTimeout(() => messageBox.classList.add('hidden'), 5000);
         }
 
-        // دالة لجلب البيانات من Google Apps Script
-        async function fetchSubscriptions() {
-            try {
-                const response = await fetch(API_URL);
-                if (!response.ok) {
-                    throw new Error(`خطأ في الاتصال: ${response.status}`);
+        // دالة لجلب البيانات من Firebase
+        function fetchSubscriptions() {
+            database.ref('subscriptions').on('value', (snapshot) => {
+                try {
+                    const data = snapshot.val();
+                    subscriptions = [];
+                    totalIncome = 0;
+
+                    if (data) {
+                        Object.keys(data).forEach((key) => {
+                            subscriptions.push({ id: key, ...data[key] });
+                            totalIncome += Number(data[key].amount || 0);
+                        });
+                    }
+
+                    renderSubscriptions();
+                    updateTotalIncome();
+                } catch (error) {
+                    console.error('خطأ في جلب البيانات:', error);
+                    showMessage('حدث خطأ أثناء جلب البيانات. تأكد من إعدادات Firebase.', 'error');
                 }
-                const data = await response.json();
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-                subscriptions = data.data || [];
-                totalIncome = data.totalIncome || 0;
-                renderSubscriptions();
-                updateTotalIncome();
-            } catch (error) {
-                console.error('خطأ في جلب البيانات:', error);
-                showMessage('حدث خطأ أثناء جلب البيانات. تأكد من رابط API وإعدادات النشر.', 'error');
-            }
+            });
         }
 
         // دالة لتحديث عرض إجمالي الدخل
@@ -264,23 +283,13 @@
             }
 
             try {
-                const response = await fetch(API_URL, {
-                    method: 'POST',
-                    body: JSON.stringify(newSubscription),
-                    headers: { 'Content-Type': 'application/json' },
-                });
-
-                const result = await response.json();
-                if (!response.ok || result.error) {
-                    throw new Error(result.error || `خطأ في الاتصال: ${response.status}`);
-                }
-
+                // إضافة الاشتراك إلى Firebase
+                await database.ref('subscriptions').push(newSubscription);
                 showMessage('تم إضافة الاشتراك بنجاح!');
                 form.reset();
-                await fetchSubscriptions(); // تحديث البيانات
             } catch (error) {
                 console.error('خطأ في إضافة الاشتراك:', error);
-                showMessage('فشل في إضافة الاشتراك. تأكد من الاتصال بالإنترنت أو إعدادات API.', 'error');
+                showMessage('فشل في إضافة الاشتراك. تأكد من إعدادات Firebase.', 'error');
             } finally {
                 submitBtn.disabled = false;
                 submitBtn.classList.remove('loading');
