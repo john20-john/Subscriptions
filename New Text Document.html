@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>إدارة الاشتراكات</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
+        body {
+            font-family: 'Cairo', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-4">
+    <div class="max-w-4xl mx-auto bg-white shadow-xl rounded-lg p-6 md:p-8">
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-2">إدارة اشتراكات قناة التليجرام</h1>
+            <p class="text-gray-600">أضف، تتبع، وابحث عن اشتراكات أعضاء قناتك.</p>
+        </header>
+
+        <!-- Analytics Section -->
+        <div class="bg-blue-100 border border-blue-200 text-blue-800 p-4 rounded-lg text-center mb-8">
+            <h3 class="text-lg md:text-xl font-semibold mb-2">إجمالي الدخل</h3>
+            <p class="text-3xl font-bold" id="total-income">0.00 جنيه</p>
+        </div>
+
+        <!-- Add Subscription Form -->
+        <section class="bg-gray-50 p-6 rounded-lg mb-8">
+            <h2 class="text-2xl font-semibold text-gray-700 mb-4">إضافة اشتراك جديد</h2>
+            <form id="add-subscription-form" class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div>
+                        <label for="user-name" class="block text-sm font-medium text-gray-700">الاسم</label>
+                        <input type="text" id="user-name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
+                    </div>
+                    <div>
+                        <label for="phone-number" class="block text-sm font-medium text-gray-700">رقم الهاتف</label>
+                        <input type="tel" id="phone-number" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2">
+                    </div>
+                    <div>
+                        <label for="telegram-username" class="block text-sm font-medium text-gray-700">يوزر التليجرام</label>
+                        <input type="text" id="telegram-username" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="amount" class="block text-sm font-medium text-gray-700">المبلغ المدفوع (بالجنيه المصري)</label>
+                        <input type="number" id="amount" min="0" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
+                    </div>
+                    <div>
+                        <label for="start-date" class="block text-sm font-medium text-gray-700">تاريخ بداية الاشتراك</label>
+                        <input type="date" id="start-date" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
+                    </div>
+                    <div>
+                        <label for="end-date" class="block text-sm font-medium text-gray-700">تاريخ نهاية الاشتراك</label>
+                        <input type="date" id="end-date" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
+                    </div>
+                </div>
+                <button type="submit" id="submit-btn" class="w-full md:w-auto px-6 py-3 bg-blue-600 text-white font-semibold rounded-md shadow-lg hover:bg-blue-700 transition-colors">
+                    <i class="fas fa-plus-circle ml-2"></i> إضافة اشتراك
+                </button>
+            </form>
+            <div id="message-box" class="mt-4 hidden p-3 rounded-md text-sm font-medium"></div>
+        </section>
+
+        <!-- Search and Subscriptions List -->
+        <section>
+            <div class="flex flex-col md:flex-row items-center justify-between mb-4">
+                <h2 class="text-2xl font-semibold text-gray-700 mb-2 md:mb-0">قائمة الاشتراكات</h2>
+                <div class="relative w-full md:w-1/2">
+                    <input type="text" id="search-input" placeholder="ابحث بالاسم، الهاتف، أو يوزر التليجرام..." class="w-full rounded-md border-gray-300 shadow-sm p-2 pr-10">
+                    <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                </div>
+            </div>
+
+            <!-- Expiration Filter Buttons -->
+            <div class="flex flex-wrap gap-2 mb-4">
+                <button class="filter-btn px-4 py-2 rounded-md font-medium text-sm border-2 border-gray-300 bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors" data-filter="all">
+                    الكل
+                </button>
+                <button class="filter-btn px-4 py-2 rounded-md font-medium text-sm border-2 border-green-400 bg-green-100 text-green-700 hover:bg-green-200 transition-colors" data-filter="active">
+                    اشتراكات سارية
+                </button>
+                <button class="filter-btn px-4 py-2 rounded-md font-medium text-sm border-2 border-yellow-400 bg-yellow-100 text-yellow-700 hover:bg-yellow-200 transition-colors" data-filter="expiring">
+                    تنتهي قريباً
+                </button>
+                <button class="filter-btn px-4 py-2 rounded-md font-medium text-sm border-2 border-red-400 bg-red-100 text-red-700 hover:bg-red-200 transition-colors" data-filter="expired">
+                    اشتراكات منتهية
+                </button>
+            </div>
+
+            <div id="subscriptions-list" class="space-y-4">
+                <!-- Data will be loaded here -->
+            </div>
+        </section>
+    </div>
+
+    <script>
+        // ضع هنا رابط Google Apps Script اللي نسخته من النشر
+        const API_URL = 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE'; // استبدل برابطك
+
+        const form = document.getElementById('add-subscription-form');
+        const submitBtn = document.getElementById('submit-btn');
+        const subscriptionsList = document.getElementById('subscriptions-list');
+        const searchInput = document.getElementById('search-input');
+        const totalIncomeEl = document.getElementById('total-income');
+        const messageBox = document.getElementById('message-box');
+        const filterButtons = document.querySelectorAll('.filter-btn');
+
+        let subscriptions = [];
+        let totalIncome = 0;
+
+        // دالة لعرض رسائل للمستخدم
+        function showMessage(message, type = 'success') {
+            messageBox.textContent = message;
+            messageBox.classList.remove('hidden', 'bg-green-100', 'text-green-800', 'bg-red-100', 'text-red-800');
+            if (type === 'success') {
+                messageBox.classList.add('bg-green-100', 'text-green-800');
+            } else {
+                messageBox.classList.add('bg-red-100', 'text-red-800');
+            }
+            setTimeout(() => messageBox.classList.add('hidden'), 5000);
+        }
+
+        // دالة لجلب البيانات من Google Apps Script
+        async function fetchSubscriptions() {
+            try {
+                const response = await fetch(API_URL);
+                if (!response.ok) {
+                    throw new Error(`خطأ في الاتصال: ${response.status}`);
+                }
+                const data = await response.json();
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                subscriptions = data.data || [];
+                totalIncome = data.totalIncome || 0;
+                renderSubscriptions();
+                updateTotalIncome();
+            } catch (error) {
+                console.error('خطأ في جلب البيانات:', error);
+                showMessage('حدث خطأ أثناء جلب البيانات. تأكد من رابط API وإعدادات النشر.', 'error');
+            }
+        }
+
+        // دالة لتحديث عرض إجمالي الدخل
+        function updateTotalIncome() {
+            totalIncomeEl.textContent = `${totalIncome.toFixed(2)} جنيه`;
+        }
+
+        // دالة لعرض الاشتراكات
+        function renderSubscriptions(filter = 'all', searchTerm = '') {
+            subscriptionsList.innerHTML = '';
+            
+            let filteredSubscriptions = subscriptions;
+
+            // تطبيق الفلتر
+            const today = new Date();
+            if (filter === 'active') {
+                filteredSubscriptions = filteredSubscriptions.filter(sub => new Date(sub.endDate) >= today);
+            } else if (filter === 'expiring') {
+                const expiringDate = new Date();
+                expiringDate.setDate(expiringDate.getDate() + 7);
+                filteredSubscriptions = filteredSubscriptions.filter(sub => {
+                    const endDate = new Date(sub.endDate);
+                    return endDate > today && endDate <= expiringDate;
+                });
+            } else if (filter === 'expired') {
+                filteredSubscriptions = filteredSubscriptions.filter(sub => new Date(sub.endDate) < today);
+            }
+
+            // تطبيق البحث
+            if (searchTerm) {
+                const lowerSearch = searchTerm.toLowerCase();
+                filteredSubscriptions = filteredSubscriptions.filter(sub =>
+                    (sub.name || '').toLowerCase().includes(lowerSearch) ||
+                    (sub.phone || '').toLowerCase().includes(lowerSearch) ||
+                    (sub.telegram || '').toLowerCase().includes(lowerSearch)
+                );
+            }
+
+            if (filteredSubscriptions.length === 0) {
+                subscriptionsList.innerHTML = '<p class="text-center text-gray-500">لا يوجد اشتراكات مطابقة.</p>';
+                return;
+            }
+
+            filteredSubscriptions.forEach(sub => {
+                const startDate = new Date(sub.startDate);
+                const endDate = new Date(sub.endDate);
+                const today = new Date();
+                
+                let statusClass = 'bg-green-500';
+                let statusText = 'ساري';
+
+                if (endDate < today) {
+                    statusClass = 'bg-red-500';
+                    statusText = 'منتهي';
+                } else if ((endDate - today) / (1000 * 60 * 60 * 24) <= 7) {
+                    statusClass = 'bg-yellow-500';
+                    statusText = 'ينتهي قريباً';
+                }
+
+                const card = document.createElement('div');
+                card.className = 'bg-white border rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow';
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-2">
+                        <h3 class="font-semibold text-lg text-gray-800">${sub.name || 'غير معروف'}</h3>
+                        <span class="px-2 py-1 rounded-full text-white text-xs font-bold ${statusClass}">${statusText}</span>
+                    </div>
+                    <div class="text-sm text-gray-600 space-y-1">
+                        <p><i class="fas fa-phone-alt ml-2 text-gray-500"></i><span dir="ltr">${sub.phone || 'غير متوفر'}</span></p>
+                        <p><i class="fab fa-telegram-plane ml-2 text-gray-500"></i> @${sub.telegram || 'غير متوفر'}</p>
+                        <p><i class="fas fa-money-bill-wave ml-2 text-gray-500"></i> ${sub.amount || 0} جنيه</p>
+                        <p><i class="far fa-calendar-alt ml-2 text-gray-500"></i> ${startDate.toLocaleDateString('ar-EG')} - ${endDate.toLocaleDateString('ar-EG')}</p>
+                    </div>
+                `;
+                subscriptionsList.appendChild(card);
+            });
+        }
+
+        // معالجة إرسال النموذج
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            submitBtn.disabled = true;
+            submitBtn.classList.add('loading');
+            submitBtn.querySelector('i').classList.add('hidden');
+
+            const newSubscription = {
+                name: document.getElementById('user-name').value.trim(),
+                phone: document.getElementById('phone-number').value.trim(),
+                telegram: document.getElementById('telegram-username').value.trim(),
+                amount: parseFloat(document.getElementById('amount').value),
+                startDate: document.getElementById('start-date').value,
+                endDate: document.getElementById('end-date').value,
+            };
+
+            // التحقق من صحة التواريخ
+            if (new Date(newSubscription.endDate) < new Date(newSubscription.startDate)) {
+                showMessage('تاريخ النهاية يجب أن يكون بعد تاريخ البداية.', 'error');
+                submitBtn.disabled = false;
+                submitBtn.classList.remove('loading');
+                submitBtn.querySelector('i').classList.remove('hidden');
+                return;
+            }
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    body: JSON.stringify(newSubscription),
+                    headers: { 'Content-Type': 'application/json' },
+                });
+
+                const result = await response.json();
+                if (!response.ok || result.error) {
+                    throw new Error(result.error || `خطأ في الاتصال: ${response.status}`);
+                }
+
+                showMessage('تم إضافة الاشتراك بنجاح!');
+                form.reset();
+                await fetchSubscriptions(); // تحديث البيانات
+            } catch (error) {
+                console.error('خطأ في إضافة الاشتراك:', error);
+                showMessage('فشل في إضافة الاشتراك. تأكد من الاتصال بالإنترنت أو إعدادات API.', 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.classList.remove('loading');
+                submitBtn.querySelector('i').classList.remove('hidden');
+            }
+        });
+
+        // معالجة البحث
+        searchInput.addEventListener('input', () => {
+            renderSubscriptions(document.querySelector('.filter-btn.bg-blue-600')?.dataset.filter || 'all', searchInput.value);
+        });
+
+        // معالجة أزرار الفلتر
+        filterButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                filterButtons.forEach(btn => btn.classList.remove('bg-blue-600', 'text-white'));
+                button.classList.add('bg-blue-600', 'text-white');
+                renderSubscriptions(button.dataset.filter, searchInput.value);
+            });
+        });
+
+        // عند تحميل الصفحة، اجلب البيانات
+        document.addEventListener('DOMContentLoaded', fetchSubscriptions);
+    </script>
+</body>
+</html>
