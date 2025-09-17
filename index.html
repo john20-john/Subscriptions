@@ -1,618 +1,575 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>إدارة الاشتراكات</title>
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Font Awesome for icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Firebase SDK (Modular Version) -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-        import { getDatabase, ref, onValue, push, set, remove, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
-        
-        // Use environment variables for Firebase config
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-        
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getDatabase(app);
-        
-        // Log levels for debugging
-        import { setLogLevel } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        setLogLevel('debug');
-        
-        // Authenticate with the provided token or anonymously
-        async function authenticate() {
-            try {
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
-                // Initialize the app after successful authentication
-                window.db = db;
-                window.currentUserId = auth.currentUser.uid;
-                initApp();
-            } catch (error) {
-                console.error("Authentication failed:", error);
-            }
-        }
-        
-        // Main app initialization function
-        function initApp() {
-            const form = document.getElementById('add-subscription-form');
-            const editForm = document.getElementById('edit-subscription-form');
-            const submitBtn = document.getElementById('submit-btn');
-            const subscriptionsList = document.getElementById('subscriptions-list');
-            const searchInput = document.getElementById('search-input');
-            const totalIncomeEl = document.getElementById('total-income');
-            const incomePeriodEl = document.getElementById('income-period');
-            const messageBox = document.getElementById('message-box');
-            const modal = document.getElementById('edit-modal');
-            const closeModalBtn = document.getElementById('close-modal-btn');
-            const hideExpiredCheckbox = document.getElementById('hide-expired-checkbox');
-            const filterButtons = document.querySelectorAll('.filter-btn');
-            const calculateIncomeBtn = document.getElementById('calculate-income-btn');
-            const userIdDisplay = document.getElementById('user-id-display');
-            
-            let subscriptions = [];
-
-            // Display the current user ID for multi-user collaboration
-            if (window.currentUserId) {
-                userIdDisplay.textContent = `معرف المستخدم (للمشاركة): ${window.currentUserId}`;
-            }
-
-            // Function to display user messages
-            window.showMessage = (message, type = 'success') => {
-                messageBox.textContent = message;
-                messageBox.classList.remove('hidden', 'bg-green-100', 'text-green-800', 'bg-red-100', 'text-red-800');
-                if (type === 'success') {
-                    messageBox.classList.add('bg-green-100', 'text-green-800');
-                } else {
-                    messageBox.classList.add('bg-red-100', 'text-red-800');
-                }
-                setTimeout(() => messageBox.classList.add('hidden'), 5000);
-            };
-
-            // Function to fetch data from the original subscriptions path
-            function fetchSubscriptions() {
-                const subsRef = ref(db, `subscriptions`);
-                onValue(subsRef, (snapshot) => {
-                    try {
-                        const data = snapshot.val();
-                        subscriptions = [];
-                        let totalIncome = 0;
-                        if (data) {
-                            Object.keys(data).forEach((key) => {
-                                subscriptions.push({ id: key, ...data[key] });
-                                totalIncome += Number(data[key].amount || 0);
-                            });
-                        }
-                        // Display total income
-                        totalIncomeEl.textContent = `${totalIncome.toFixed(2)} جنيه`;
-                        renderSubscriptions();
-                    } catch (error) {
-                        console.error('Error fetching data:', error);
-                        showMessage('An error occurred while fetching data. Check your Firebase settings.', 'error');
-                    }
-                });
-            }
-
-            // Function to calculate income for a specific period
-            calculateIncomeBtn.addEventListener('click', () => {
-                const startDateInput = document.getElementById('start-date-income');
-                const endDateInput = document.getElementById('end-date-income');
-                const startDate = new Date(startDateInput.value);
-                const endDate = new Date(endDateInput.value);
-
-                if (!startDateInput.value || !endDateInput.value || startDate > endDate) {
-                    showMessage('Please select a valid time period.', 'error');
-                    return;
-                }
-
-                let periodIncome = 0;
-                subscriptions.forEach(sub => {
-                    const subStartDate = new Date(sub.startDate);
-                    if (subStartDate >= startDate && subStartDate <= endDate) {
-                        periodIncome += Number(sub.amount || 0);
-                    }
-                    if (sub.history && Array.isArray(sub.history)) {
-                        sub.history.forEach(hist => {
-                            const histStartDate = new Date(hist.startDate);
-                            if (histStartDate >= startDate && histStartDate <= endDate) {
-                                periodIncome += Number(hist.amount || 0);
-                            }
-                        });
-                    }
-                });
-                incomePeriodEl.textContent = `${periodIncome.toFixed(2)} جنيه`;
-            });
-
-            // Function to render subscriptions with filtering and searching
-            function renderSubscriptions() {
-                subscriptionsList.innerHTML = '';
-                const searchTerm = searchInput.value.toLowerCase();
-                const currentFilter = document.querySelector('.filter-btn.bg-blue-600')?.dataset.filter || 'all';
-                const hideExpired = hideExpiredCheckbox.checked;
-                
-                let filteredSubscriptions = subscriptions.filter(sub => {
-                    const isMatch = (sub.name?.toLowerCase().includes(searchTerm) ||
-                                     sub.phone?.includes(searchTerm) ||
-                                     sub.telegram?.toLowerCase().includes(searchTerm));
-                    
-                    const today = new Date();
-                    const endDate = new Date(sub.endDate);
-                    
-                    if (hideExpired && endDate < today) {
-                        return false;
-                    }
-
-                    if (currentFilter === 'active') {
-                        return endDate >= today && isMatch;
-                    } else if (currentFilter === 'expiring') {
-                        const expiringDate = new Date();
-                        expiringDate.setDate(expiringDate.getDate() + 7);
-                        return endDate > today && endDate <= expiringDate && isMatch;
-                    } else if (currentFilter === 'expired') {
-                        return endDate < today && isMatch;
-                    }
-                    return isMatch;
-                });
-
-                if (filteredSubscriptions.length === 0) {
-                    subscriptionsList.innerHTML = '<p class="text-center text-gray-500">لا يوجد اشتراكات مطابقة.</p>';
-                    return;
-                }
-
-                filteredSubscriptions.forEach(sub => {
-                    const endDate = new Date(sub.endDate);
-                    const today = new Date();
-                    
-                    let statusClass = 'bg-green-500';
-                    let statusText = 'ساري';
-
-                    if (endDate < today) {
-                        statusClass = 'bg-red-500';
-                        statusText = 'منتهي';
-                    } else if ((endDate - today) / (1000 * 60 * 60 * 24) <= 7) {
-                        statusClass = 'bg-yellow-500';
-                        statusText = 'ينتهي قريباً';
-                    }
-
-                    const card = document.createElement('div');
-                    card.className = 'bg-white border rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow';
-                    card.innerHTML = `
-                        <div class="flex justify-between items-start mb-2">
-                            <h3 class="font-semibold text-lg text-gray-800">${sub.name || 'غير معروف'}</h3>
-                            <div class="flex items-center space-x-4 space-x-reverse">
-                                <span class="px-2 py-1 rounded-full text-white text-xs font-bold ${statusClass}">${statusText}</span>
-                                <button class="edit-btn text-blue-500 hover:text-blue-700 transition-colors" data-id="${sub.id}" title="تجديد/تعديل">
-                                    <i class="fas fa-edit"></i>
-                                </button>
-                                <button class="delete-btn text-red-500 hover:text-red-700 transition-colors" data-id="${sub.id}" title="حذف">
-                                    <i class="fas fa-trash-alt"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="text-sm text-gray-600 space-y-1">
-                            <p><i class="fas fa-phone-alt ml-2 text-gray-500"></i><span dir="ltr">${sub.phone || 'غير متوفر'}</span></p>
-                            <p><i class="fab fa-telegram-plane ml-2 text-gray-500"></i> @${sub.telegram || 'غير متوفر'}</p>
-                            <p><i class="fas fa-money-bill-wave ml-2 text-gray-500"></i> ${sub.amount || 0} جنيه</p>
-                            <p><i class="far fa-calendar-alt ml-2 text-gray-500"></i> ${new Date(sub.startDate).toLocaleDateString('ar-EG')} - ${new Date(sub.endDate).toLocaleDateString('ar-EG')}</p>
-                        </div>
-                    `;
-                    subscriptionsList.appendChild(card);
-                });
-
-                // Add event listeners for new buttons
-                document.querySelectorAll('.edit-btn').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        const subId = e.currentTarget.dataset.id;
-                        openEditModal(subId);
-                    });
-                });
-                document.querySelectorAll('.delete-btn').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        const subId = e.currentTarget.dataset.id;
-                        showConfirmationModal(subId);
-                    });
-                });
-            }
-
-            // Handle adding a new subscription
-            form.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                submitBtn.disabled = true;
-                submitBtn.classList.add('loading');
-                submitBtn.querySelector('i').classList.add('hidden');
-
-                const newSubscription = {
-                    name: document.getElementById('user-name').value.trim(),
-                    phone: document.getElementById('phone-number').value.trim(),
-                    telegram: document.getElementById('telegram-username').value.trim(),
-                    amount: parseFloat(document.getElementById('amount').value),
-                    startDate: document.getElementById('start-date').value,
-                    endDate: document.getElementById('end-date').value,
-                };
-
-                if (new Date(newSubscription.endDate) < new Date(newSubscription.startDate)) {
-                    showMessage('End date must be after the start date.', 'error');
-                    submitBtn.disabled = false;
-                    submitBtn.classList.remove('loading');
-                    submitBtn.querySelector('i').classList.remove('hidden');
-                    return;
-                }
-
-                try {
-                    // Push to the same original 'subscriptions' path
-                    await push(ref(db, `subscriptions`), newSubscription);
-                    showMessage('Subscription added successfully!');
-                    form.reset();
-                } catch (error) {
-                    console.error('Error adding subscription:', error);
-                    showMessage('Failed to add subscription. Check your Firebase settings.', 'error');
-                } finally {
-                    submitBtn.disabled = false;
-                    submitBtn.classList.remove('loading');
-                    submitBtn.querySelector('i').classList.remove('hidden');
-                }
-            });
-
-            // Open the edit modal
-            async function openEditModal(subId) {
-                const subRef = ref(db, `subscriptions/${subId}`);
-                try {
-                    const snapshot = await get(subRef);
-                    if (snapshot.exists()) {
-                        const sub = snapshot.val();
-                        document.getElementById('edit-id').value = subId;
-                        document.getElementById('edit-user-name').value = sub.name || '';
-                        document.getElementById('edit-phone-number').value = sub.phone || '';
-                        document.getElementById('edit-telegram-username').value = sub.telegram || '';
-                        document.getElementById('edit-amount').value = sub.amount || 0;
-                        document.getElementById('edit-end-date').value = sub.endDate || '';
-                        
-                        const historyList = document.getElementById('history-list');
-                        historyList.innerHTML = '';
-                        if (sub.history && Array.isArray(sub.history) && sub.history.length > 0) {
-                            sub.history.forEach((hist, index) => {
-                                const li = document.createElement('li');
-                                li.className = 'border-b last:border-0 py-2';
-                                li.innerHTML = `<p class="text-xs text-gray-500 mb-1">Previous Subscription #${index + 1}</p>
-                                                <p><i class="fas fa-money-bill-wave ml-1"></i> ${hist.amount} جنيه</p>
-                                                <p><i class="far fa-calendar-alt ml-1"></i> ${new Date(hist.startDate).toLocaleDateString('ar-EG')} - ${new Date(hist.endDate).toLocaleDateString('ar-EG')}</p>`;
-                                historyList.appendChild(li);
-                            });
-                            document.getElementById('history-section').classList.remove('hidden');
-                        } else {
-                            document.getElementById('history-section').classList.add('hidden');
-                        }
-
-                        modal.classList.remove('hidden');
-                    } else {
-                        showMessage('Subscription not found.', 'error');
-                    }
-                } catch (error) {
-                    console.error('Error fetching subscription data:', error);
-                    showMessage('An error occurred while fetching subscription data.', 'error');
-                }
-            }
-
-            // Handle edit/renew form submission
-            editForm.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const editBtn = document.getElementById('edit-submit-btn');
-                editBtn.disabled = true;
-                editBtn.classList.add('loading');
-                editBtn.querySelector('i').classList.add('hidden');
-
-                const subId = document.getElementById('edit-id').value;
-                const subRef = ref(db, `subscriptions/${subId}`);
-                
-                const currentSub = (await get(subRef)).val();
-                
-                const newEndDate = document.getElementById('edit-end-date').value;
-                const newAmount = parseFloat(document.getElementById('edit-amount').value);
-
-                if (new Date(newEndDate) < new Date(currentSub.endDate)) {
-                    showMessage('The new end date must be after the current end date.', 'error');
-                    editBtn.disabled = false;
-                    editBtn.classList.remove('loading');
-                    editBtn.querySelector('i').classList.remove('hidden');
-                    return;
-                }
-                
-                try {
-                    const updatedHistory = currentSub.history || [];
-                    updatedHistory.push({
-                        amount: currentSub.amount,
-                        startDate: currentSub.startDate,
-                        endDate: currentSub.endDate
-                    });
-
-                    await set(subRef, {
-                        ...currentSub,
-                        amount: newAmount,
-                        startDate: new Date().toISOString().slice(0, 10), // Use today's date as new start date
-                        endDate: newEndDate,
-                        history: updatedHistory
-                    });
-
-                    showMessage('Subscription renewed successfully!');
-                    modal.classList.add('hidden');
-                } catch (error) {
-                    console.error('Error renewing subscription:', error);
-                    showMessage('Failed to renew subscription.', 'error');
-                } finally {
-                    editBtn.disabled = false;
-                    editBtn.classList.remove('loading');
-                    editBtn.querySelector('i').classList.remove('hidden');
-                }
-            });
-
-            // Show delete confirmation modal
-            function showConfirmationModal(subId) {
-                const modal = document.getElementById('confirmation-modal');
-                const confirmBtn = document.getElementById('confirm-delete-btn');
-                const cancelBtn = document.getElementById('cancel-delete-btn');
-
-                modal.classList.remove('hidden');
-                confirmBtn.onclick = () => {
-                    deleteSubscription(subId);
-                    modal.classList.add('hidden');
-                };
-                cancelBtn.onclick = () => {
-                    modal.classList.add('hidden');
-                };
-            }
-
-            // Delete a subscription
-            async function deleteSubscription(subId) {
-                try {
-                    await remove(ref(db, `subscriptions/${subId}`));
-                    showMessage('Subscription deleted successfully.');
-                } catch (error) {
-                    console.error('Error deleting subscription:', error);
-                    showMessage('Failed to delete subscription.', 'error');
-                }
-            }
-            
-            // Event listeners
-            searchInput.addEventListener('input', renderSubscriptions);
-            hideExpiredCheckbox.addEventListener('change', renderSubscriptions);
-            filterButtons.forEach(button => {
-                button.addEventListener('click', () => {
-                    filterButtons.forEach(btn => btn.classList.remove('bg-blue-600', 'text-white'));
-                    button.classList.add('bg-blue-600', 'text-white');
-                    renderSubscriptions();
-                });
-            });
-            closeModalBtn.addEventListener('click', () => {
-                modal.classList.add('hidden');
-            });
-            
-            // Fetch data on app load
-            fetchSubscriptions();
-        }
-        
-        // Start the authentication process
-        authenticate();
-    </script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
-        body {
-            font-family: 'Cairo', sans-serif;
-            background-color: #f3f4f6;
-        }
-        .loading::after {
-            content: '';
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid #fff;
-            border-radius: 50%;
-            border-top-color: transparent;
-            animation: spin 1s linear infinite;
-            margin-right: 8px;
-        }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        /* Style for modals */
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        }
-        .modal-content {
-            background-color: white;
-            padding: 2rem;
-            border-radius: 0.5rem;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            width: 90%;
-            max-width: 600px;
-            position: relative;
-        }
-    </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>إدارة الاشتراكات</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Firebase SDK (Latest version compatible with CDN) -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
+        body {
+            font-family: 'Cairo', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
 </head>
 <body class="bg-gray-100 p-4">
+    <div class="max-w-4xl mx-auto bg-white shadow-xl rounded-lg p-6 md:p-8">
+        <!-- Header -->
+        <header class="text-center mb-8">
+           <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-2">إدارة اشتراكات قناة التليجرام</h1>
+            <p class="text-gray-600">أضف، تتبع، وابحث عن اشتراكات أعضاء قناتك.</p>
+        </header>
+        <!-- Analytics Section -->
+        <div class="bg-blue-100 border border-blue-200 text-blue-800 p-4 rounded-lg text-center mb-8">
+            <h3 class="text-lg md:text-xl font-semibold mb-2">إجمالي الدخل</h3>
+            <p class="text-3xl font-bold" id="total-income">0.00 جنيه</p>
+        </div>
+       <!-- Add Subscription Form -->
+        <section class="bg-gray-50 p-6 rounded-lg mb-8">
+            <h2 class="text-2xl font-semibold text-gray-700 mb-4">إضافة اشتراك جديد</h2>
+            <form id="add-subscription-form" class="space-y-4">
+               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div>
+                        <label for="user-name" class="block text-sm font-medium text-gray-700">الاسم</label>
+                        <input type="text" id="user-name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
+                    </div>
+                    <div>
+                       <label for="phone-number" class="block text-sm font-medium text-gray-700">رقم الهاتف</label>
 
-    <!-- Main App Container -->
-    <div class="max-w-4xl mx-auto bg-white shadow-xl rounded-lg p-6 md:p-8">
+                        <input type="tel" id="phone-number" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2">
 
-        <!-- Header -->
-        <header class="text-center mb-8">
-            <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-2">إدارة اشتراكات قناة التليجرام</h1>
-            <p class="text-gray-600">أضف، تتبع، وابحث عن اشتراكات أعضاء قناتك.</p>
-        </header>
+                    </div>
 
-        <!-- User ID for Collaboration -->
-        <p id="user-id-display" class="text-sm text-gray-500 text-center mb-4"></p>
-        
-        <!-- Analytics Section -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-            <div class="bg-blue-100 border border-blue-200 text-blue-800 p-4 rounded-lg text-center">
-                <h3 class="text-lg md:text-xl font-semibold mb-2">إجمالي الدخل</h3>
-                <p class="text-3xl font-bold" id="total-income">0.00 جنيه</p>
-            </div>
-            <div class="bg-purple-100 border border-purple-200 text-purple-800 p-4 rounded-lg">
-                <h3 class="text-lg font-semibold mb-2">دخل الفترة المحددة</h3>
-                <div class="flex items-center gap-2">
-                    <input type="date" id="start-date-income" class="flex-1 rounded-md p-1 text-sm border-purple-300">
-                    <span class="text-purple-700 font-bold">إلى</span>
-                    <input type="date" id="end-date-income" class="flex-1 rounded-md p-1 text-sm border-purple-300">
-                </div>
-                <button id="calculate-income-btn" class="w-full mt-2 px-4 py-2 bg-purple-600 text-white rounded-md shadow-md hover:bg-purple-700 transition-colors">
-                    <i class="fas fa-calculator ml-2"></i> احسب
-                </button>
-                <p class="text-2xl font-bold text-center mt-2" id="income-period">0.00 جنيه</p>
-            </div>
-        </div>
+                    <div>
 
-        <!-- Add Subscription Form -->
-        <section class="bg-gray-50 p-6 rounded-lg mb-8">
-            <h2 class="text-2xl font-semibold text-gray-700 mb-4">إضافة اشتراك جديد</h2>
-            <form id="add-subscription-form" class="space-y-4">
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div>
-                        <label for="user-name" class="block text-sm font-medium text-gray-700">الاسم</label>
-                        <input type="text" id="user-name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
-                    </div>
-                    <div>
-                        <label for="phone-number" class="block text-sm font-medium text-gray-700">رقم الهاتف</label>
-                        <input type="tel" id="phone-number" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2">
-                    </div>
-                    <div>
-                        <label for="telegram-username" class="block text-sm font-medium text-gray-700">يوزر التليجرام</label>
-                        <input type="text" id="telegram-username" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
-                    </div>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label for="amount" class="block text-sm font-medium text-gray-700">المبلغ المدفوع (بالجنيه المصري)</label>
-                        <input type="number" id="amount" min="0" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
-                    </div>
-                    <div>
-                        <label for="start-date" class="block text-sm font-medium text-gray-700">تاريخ بداية الاشتراك</label>
-                        <input type="date" id="start-date" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
-                    </div>
-                    <div>
-                        <label for="end-date" class="block text-sm font-medium text-gray-700">تاريخ نهاية الاشتراك</label>
-                        <input type="date" id="end-date" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
-                    </div>
-                </div>
-                <button type="submit" id="submit-btn" class="w-full md:w-auto px-6 py-3 bg-blue-600 text-white font-semibold rounded-md shadow-lg hover:bg-blue-700 transition-colors">
-                    <i class="fas fa-plus-circle ml-2"></i> إضافة اشتراك
-                </button>
-            </form>
-            <div id="message-box" class="mt-4 hidden p-3 rounded-md text-sm font-medium"></div>
-        </section>
+                        <label for="telegram-username" class="block text-sm font-medium text-gray-700">يوزر التليجرام</label>
 
-        <!-- Search and Subscriptions List -->
-        <section>
-            <div class="flex flex-col md:flex-row items-center justify-between mb-4">
-                <h2 class="text-2xl font-semibold text-gray-700 mb-2 md:mb-0">قائمة الاشتراكات</h2>
-                <div class="relative w-full md:w-1/2">
-                    <input type="text" id="search-input" placeholder="ابحث بالاسم، الهاتف، أو يوزر التليجرام..." class="w-full rounded-md border-gray-300 shadow-sm p-2 pr-10">
-                    <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
-                </div>
-            </div>
+                        <input type="text" id="telegram-username" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
 
-            <!-- Expiration Filter Buttons and Hide Checkbox -->
-            <div class="flex flex-wrap gap-2 mb-4 items-center">
-                <button class="filter-btn px-4 py-2 rounded-md font-medium text-sm border-2 border-gray-300 bg-blue-600 text-white hover:bg-blue-700 transition-colors" data-filter="all">
-                    الكل
-                </button>
-                <button class="filter-btn px-4 py-2 rounded-md font-medium text-sm border-2 border-green-400 bg-green-100 text-green-700 hover:bg-green-200 transition-colors" data-filter="active">
-                    سارية
-                </button>
-                <button class="filter-btn px-4 py-2 rounded-md font-medium text-sm border-2 border-yellow-400 bg-yellow-100 text-yellow-700 hover:bg-yellow-200 transition-colors" data-filter="expiring">
-                    تنتهي قريباً
-                </button>
-                <button class="filter-btn px-4 py-2 rounded-md font-medium text-sm border-2 border-red-400 bg-red-100 text-red-700 hover:bg-red-200 transition-colors" data-filter="expired">
-                    منتهية
-                </button>
-                <div class="flex items-center ml-auto">
-                    <label for="hide-expired-checkbox" class="text-sm text-gray-600 ml-2">إخفاء المنتهية</label>
-                    <input type="checkbox" id="hide-expired-checkbox" class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                </div>
-            </div>
+                    </div>
 
-            <div id="subscriptions-list" class="space-y-4">
-                <!-- Data will be loaded here -->
-            </div>
-        </section>
-    </div>
+                </div>
 
-    <!-- Edit/Renew Modal -->
-    <div id="edit-modal" class="modal-overlay hidden">
-        <div class="modal-content">
-            <h3 class="text-2xl font-semibold mb-4 text-gray-800">تجديد أو تعديل الاشتراك</h3>
-            <span class="absolute top-4 left-4 text-gray-500 hover:text-gray-800 cursor-pointer" id="close-modal-btn">
-                <i class="fas fa-times-circle text-2xl"></i>
-            </span>
-            <form id="edit-subscription-form" class="space-y-4">
-                <input type="hidden" id="edit-id">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label for="edit-user-name" class="block text-sm font-medium text-gray-700">الاسم</label>
-                        <input type="text" id="edit-user-name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 bg-gray-100 cursor-not-allowed" readonly>
-                    </div>
-                    <div>
-                        <label for="edit-telegram-username" class="block text-sm font-medium text-gray-700">يوزر التليجرام</label>
-                        <input type="text" id="edit-telegram-username" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 bg-gray-100 cursor-not-allowed" readonly>
-                    </div>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label for="edit-amount" class="block text-sm font-medium text-gray-700">المبلغ المدفوع (جديد)</label>
-                        <input type="number" id="edit-amount" min="0" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
-                    </div>
-                    <div>
-                        <label for="edit-end-date" class="block text-sm font-medium text-gray-700">تاريخ نهاية الاشتراك (جديد)</label>
-                        <input type="date" id="edit-end-date" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
-                    </div>
-                </div>
-                
-                <div id="history-section" class="bg-gray-100 p-4 rounded-lg hidden">
-                    <h4 class="text-md font-semibold mb-2">سجل الاشتراكات السابقة</h4>
-                    <ul id="history-list" class="space-y-2 text-sm text-gray-600">
-                        <!-- History items will be dynamically added here -->
-                    </ul>
-                </div>
-                
-                <button type="submit" id="edit-submit-btn" class="w-full px-6 py-3 bg-green-600 text-white font-semibold rounded-md shadow-lg hover:bg-green-700 transition-colors">
-                    <i class="fas fa-sync-alt ml-2"></i> تحديث وتجديد
-                </button>
-            </form>
-        </div>
-    </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-    <!-- Confirmation Modal -->
-    <div id="confirmation-modal" class="modal-overlay hidden">
-        <div class="modal-content text-center">
-            <h3 class="text-xl font-semibold mb-4 text-gray-800">تأكيد الحذف</h3>
-            <p class="mb-6 text-gray-600">هل أنت متأكد أنك تريد حذف هذا الاشتراك؟ لا يمكن التراجع عن هذا الإجراء.</p>
-            <div class="flex justify-center space-x-4 space-x-reverse">
-                <button id="cancel-delete-btn" class="px-6 py-2 bg-gray-300 text-gray-800 font-semibold rounded-md hover:bg-gray-400 transition-colors">إلغاء</button>
-                <button id="confirm-delete-btn" class="px-6 py-2 bg-red-600 text-white font-semibold rounded-md hover:bg-red-700 transition-colors">تأكيد الحذف</button>
-            </div>
-        </div>
-    </div>
+                    <div>
+
+                        <label for="amount" class="block text-sm font-medium text-gray-700">المبلغ المدفوع (بالجنيه المصري)</label>
+
+                        <input type="number" id="amount" min="0" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
+
+                    </div>
+
+                    <div>
+
+                        <label for="start-date" class="block text-sm font-medium text-gray-700">تاريخ بداية الاشتراك</label>
+
+                        <input type="date" id="start-date" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
+
+                    </div>
+
+                    <div>
+
+                        <label for="end-date" class="block text-sm font-medium text-gray-700">تاريخ نهاية الاشتراك</label>
+
+                        <input type="date" id="end-date" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" required>
+
+                    </div>
+
+                </div>
+
+                <button type="submit" id="submit-btn" class="w-full md:w-auto px-6 py-3 bg-blue-600 text-white font-semibold rounded-md shadow-lg hover:bg-blue-700 transition-colors">
+
+                    <i class="fas fa-plus-circle ml-2"></i> إضافة اشتراك
+
+                </button>
+
+            </form>
+
+            <div id="message-box" class="mt-4 hidden p-3 rounded-md text-sm font-medium"></div>
+
+        </section>
+
+
+
+        <!-- Search and Subscriptions List -->
+
+        <section>
+
+            <div class="flex flex-col md:flex-row items-center justify-between mb-4">
+
+                <h2 class="text-2xl font-semibold text-gray-700 mb-2 md:mb-0">قائمة الاشتراكات</h2>
+
+                <div class="relative w-full md:w-1/2">
+
+                    <input type="text" id="search-input" placeholder="ابحث بالاسم، الهاتف، أو يوزر التليجرام..." class="w-full rounded-md border-gray-300 shadow-sm p-2 pr-10">
+
+                    <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- Expiration Filter Buttons -->
+
+            <div class="flex flex-wrap gap-2 mb-4">
+
+                <button class="filter-btn px-4 py-2 rounded-md font-medium text-sm border-2 border-gray-300 bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors" data-filter="all">
+
+                    الكل
+
+                </button>
+
+                <button class="filter-btn px-4 py-2 rounded-md font-medium text-sm border-2 border-green-400 bg-green-100 text-green-700 hover:bg-green-200 transition-colors" data-filter="active">
+
+                    اشتراكات سارية
+
+                </button>
+
+                <button class="filter-btn px-4 py-2 rounded-md font-medium text-sm border-2 border-yellow-400 bg-yellow-100 text-yellow-700 hover:bg-yellow-200 transition-colors" data-filter="expiring">
+
+                    تنتهي قريباً
+
+                </button>
+
+                <button class="filter-btn px-4 py-2 rounded-md font-medium text-sm border-2 border-red-400 bg-red-100 text-red-700 hover:bg-red-200 transition-colors" data-filter="expired">
+
+                    اشتراكات منتهية
+
+                </button>
+
+            </div>
+
+
+
+            <div id="subscriptions-list" class="space-y-4">
+
+                <!-- Data will be loaded here -->
+
+            </div>
+
+        </section>
+
+    </div>
+
+
+
+    <script>
+
+        // إعداد Firebase
+
+        const firebaseConfig = {
+
+            apiKey: "AIzaSyACa3X5iWjiqCYWAkTKZimr7EyS3VZWpFQ",
+
+            authDomain: "dfgsdgdfg-3f8ad.firebaseapp.com",
+
+            databaseURL: "https://dfgsdgdfg-3f8ad-default-rtdb.firebaseio.com",
+
+            projectId: "dfgsdgdfg-3f8ad",
+
+            storageBucket: "dfgsdgdfg-3f8ad.firebasestorage.app",
+
+            messagingSenderId: "1041863800382",
+
+            appId: "1:1041863800382:web:086b88de7bde76e6f0c36f",
+
+            measurementId: "G-VXZQF639M2"
+
+        };
+
+
+
+        // تهيئة Firebase
+
+        firebase.initializeApp(firebaseConfig);
+
+        const database = firebase.database();
+
+
+
+        const form = document.getElementById('add-subscription-form');
+
+        const submitBtn = document.getElementById('submit-btn');
+
+        const subscriptionsList = document.getElementById('subscriptions-list');
+
+        const searchInput = document.getElementById('search-input');
+
+        const totalIncomeEl = document.getElementById('total-income');
+
+        const messageBox = document.getElementById('message-box');
+
+        const filterButtons = document.querySelectorAll('.filter-btn');
+
+
+
+        let subscriptions = [];
+
+        let totalIncome = 0;
+
+
+
+        // دالة لعرض رسائل للمستخدم
+
+        function showMessage(message, type = 'success') {
+
+            messageBox.textContent = message;
+
+            messageBox.classList.remove('hidden', 'bg-green-100', 'text-green-800', 'bg-red-100', 'text-red-800');
+
+            if (type === 'success') {
+
+                messageBox.classList.add('bg-green-100', 'text-green-800');
+
+            } else {
+
+                messageBox.classList.add('bg-red-100', 'text-red-800');
+
+            }
+
+            setTimeout(() => messageBox.classList.add('hidden'), 5000);
+
+        }
+
+
+
+        // دالة لجلب البيانات من Firebase
+
+        function fetchSubscriptions() {
+
+            database.ref('subscriptions').on('value', (snapshot) => {
+
+                try {
+
+                    const data = snapshot.val();
+
+                    subscriptions = [];
+
+                    totalIncome = 0;
+
+
+
+                    if (data) {
+
+                        Object.keys(data).forEach((key) => {
+
+                            subscriptions.push({ id: key, ...data[key] });
+
+                            totalIncome += Number(data[key].amount || 0);
+
+                        });
+
+                    }
+
+
+
+                    renderSubscriptions();
+
+                    updateTotalIncome();
+
+                } catch (error) {
+
+                    console.error('خطأ في جلب البيانات:', error);
+
+                    showMessage('حدث خطأ أثناء جلب البيانات. تأكد من إعدادات Firebase.', 'error');
+
+                }
+
+            });
+
+        }
+
+
+
+        // دالة لتحديث عرض إجمالي الدخل
+
+        function updateTotalIncome() {
+
+            totalIncomeEl.textContent = `${totalIncome.toFixed(2)} جنيه`;
+
+        }
+
+
+
+        // دالة لعرض الاشتراكات
+
+        function renderSubscriptions(filter = 'all', searchTerm = '') {
+
+            subscriptionsList.innerHTML = '';
+
+            
+
+            let filteredSubscriptions = subscriptions;
+
+
+
+            // تطبيق الفلتر
+
+            const today = new Date();
+
+            if (filter === 'active') {
+
+                filteredSubscriptions = filteredSubscriptions.filter(sub => new Date(sub.endDate) >= today);
+
+            } else if (filter === 'expiring') {
+
+                const expiringDate = new Date();
+
+                expiringDate.setDate(expiringDate.getDate() + 7);
+
+                filteredSubscriptions = filteredSubscriptions.filter(sub => {
+
+                    const endDate = new Date(sub.endDate);
+
+                    return endDate > today && endDate <= expiringDate;
+
+                });
+
+            } else if (filter === 'expired') {
+
+                filteredSubscriptions = filteredSubscriptions.filter(sub => new Date(sub.endDate) < today);
+
+            }
+
+
+
+            // تطبيق البحث
+
+            if (searchTerm) {
+
+                const lowerSearch = searchTerm.toLowerCase();
+
+                filteredSubscriptions = filteredSubscriptions.filter(sub =>
+
+                    (sub.name || '').toLowerCase().includes(lowerSearch) ||
+
+                    (sub.phone || '').toLowerCase().includes(lowerSearch) ||
+
+                    (sub.telegram || '').toLowerCase().includes(lowerSearch)
+
+                );
+
+            }
+
+
+
+            if (filteredSubscriptions.length === 0) {
+
+                subscriptionsList.innerHTML = '<p class="text-center text-gray-500">لا يوجد اشتراكات مطابقة.</p>';
+
+                return;
+
+            }
+
+
+
+            filteredSubscriptions.forEach(sub => {
+
+                const startDate = new Date(sub.startDate);
+
+                const endDate = new Date(sub.endDate);
+
+                const today = new Date();
+
+                
+
+                let statusClass = 'bg-green-500';
+
+                let statusText = 'ساري';
+
+
+
+                if (endDate < today) {
+
+                    statusClass = 'bg-red-500';
+
+                    statusText = 'منتهي';
+
+                } else if ((endDate - today) / (1000 * 60 * 60 * 24) <= 7) {
+
+                    statusClass = 'bg-yellow-500';
+
+                    statusText = 'ينتهي قريباً';
+
+                }
+
+
+
+                const card = document.createElement('div');
+
+                card.className = 'bg-white border rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow';
+
+                card.innerHTML = `
+
+                    <div class="flex justify-between items-start mb-2">
+
+                        <h3 class="font-semibold text-lg text-gray-800">${sub.name || 'غير معروف'}</h3>
+
+                        <span class="px-2 py-1 rounded-full text-white text-xs font-bold ${statusClass}">${statusText}</span>
+
+                    </div>
+
+                    <div class="text-sm text-gray-600 space-y-1">
+
+                        <p><i class="fas fa-phone-alt ml-2 text-gray-500"></i><span dir="ltr">${sub.phone || 'غير متوفر'}</span></p>
+
+                        <p><i class="fab fa-telegram-plane ml-2 text-gray-500"></i> @${sub.telegram || 'غير متوفر'}</p>
+
+                        <p><i class="fas fa-money-bill-wave ml-2 text-gray-500"></i> ${sub.amount || 0} جنيه</p>
+
+                        <p><i class="far fa-calendar-alt ml-2 text-gray-500"></i> ${startDate.toLocaleDateString('ar-EG')} - ${endDate.toLocaleDateString('ar-EG')}</p>
+
+                    </div>
+
+                `;
+
+                subscriptionsList.appendChild(card);
+
+            });
+
+        }
+
+
+
+        // معالجة إرسال النموذج
+
+        form.addEventListener('submit', async (e) => {
+
+            e.preventDefault();
+
+            submitBtn.disabled = true;
+
+            submitBtn.classList.add('loading');
+
+            submitBtn.querySelector('i').classList.add('hidden');
+
+
+
+            const newSubscription = {
+
+                name: document.getElementById('user-name').value.trim(),
+
+                phone: document.getElementById('phone-number').value.trim(),
+
+                telegram: document.getElementById('telegram-username').value.trim(),
+
+                amount: parseFloat(document.getElementById('amount').value),
+
+                startDate: document.getElementById('start-date').value,
+
+                endDate: document.getElementById('end-date').value,
+
+            };
+
+
+
+            // التحقق من صحة التواريخ
+
+            if (new Date(newSubscription.endDate) < new Date(newSubscription.startDate)) {
+
+                showMessage('تاريخ النهاية يجب أن يكون بعد تاريخ البداية.', 'error');
+
+                submitBtn.disabled = false;
+
+                submitBtn.classList.remove('loading');
+
+                submitBtn.querySelector('i').classList.remove('hidden');
+
+                return;
+
+            }
+
+
+
+            try {
+
+                // إضافة الاشتراك إلى Firebase
+
+                await database.ref('subscriptions').push(newSubscription);
+
+                showMessage('تم إضافة الاشتراك بنجاح!');
+
+                form.reset();
+
+            } catch (error) {
+
+                console.error('خطأ في إضافة الاشتراك:', error);
+
+                showMessage('فشل في إضافة الاشتراك. تأكد من إعدادات Firebase.', 'error');
+
+            } finally {
+
+                submitBtn.disabled = false;
+
+                submitBtn.classList.remove('loading');
+
+                submitBtn.querySelector('i').classList.remove('hidden');
+
+            }
+
+        });
+
+
+
+        // معالجة البحث
+
+        searchInput.addEventListener('input', () => {
+
+            renderSubscriptions(document.querySelector('.filter-btn.bg-blue-600')?.dataset.filter || 'all', searchInput.value);
+
+        });
+
+
+
+        // معالجة أزرار الفلتر
+
+        filterButtons.forEach(button => {
+
+            button.addEventListener('click', () => {
+
+                filterButtons.forEach(btn => btn.classList.remove('bg-blue-600', 'text-white'));
+
+                button.classList.add('bg-blue-600', 'text-white');
+
+                renderSubscriptions(button.dataset.filter, searchInput.value);
+
+            });
+
+        });
+
+
+
+        // عند تحميل الصفحة، اجلب البيانات
+
+        document.addEventListener('DOMContentLoaded', fetchSubscriptions);
+
+    </script>
 
 </body>
+
 </html>
+
