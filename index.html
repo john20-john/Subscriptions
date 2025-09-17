@@ -14,16 +14,19 @@
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
         import { getDatabase, ref, onValue, push, set, remove, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
         
-        // استخدام متغيرات البيئة بدلاً من إعدادات Firebase المباشرة
+        // Use environment variables for Firebase config
         const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
+        
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getDatabase(app);
-
-        // تسجيل الدخول باستخدام الرمز المميز المقدم من البيئة
+        
+        // Log levels for debugging
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        setLogLevel('debug');
+        
+        // Authenticate with the provided token or anonymously
         async function authenticate() {
             try {
                 if (initialAuthToken) {
@@ -31,10 +34,8 @@
                 } else {
                     await signInAnonymously(auth);
                 }
-                // تهيئة التطبيق بعد تسجيل الدخول
+                // Initialize the app after successful authentication
                 window.db = db;
-                window.auth = auth;
-                window.appId = appId;
                 window.currentUserId = auth.currentUser.uid;
                 initApp();
             } catch (error) {
@@ -42,7 +43,7 @@
             }
         }
         
-        // دالة لإعداد التطبيق بالكامل بعد المصادقة
+        // Main app initialization function
         function initApp() {
             const form = document.getElementById('add-subscription-form');
             const editForm = document.getElementById('edit-subscription-form');
@@ -57,10 +58,16 @@
             const hideExpiredCheckbox = document.getElementById('hide-expired-checkbox');
             const filterButtons = document.querySelectorAll('.filter-btn');
             const calculateIncomeBtn = document.getElementById('calculate-income-btn');
+            const userIdDisplay = document.getElementById('user-id-display');
             
             let subscriptions = [];
 
-            // دالة لعرض رسائل للمستخدم
+            // Display the current user ID for multi-user collaboration
+            if (window.currentUserId) {
+                userIdDisplay.textContent = `معرف المستخدم (للمشاركة): ${window.currentUserId}`;
+            }
+
+            // Function to display user messages
             window.showMessage = (message, type = 'success') => {
                 messageBox.textContent = message;
                 messageBox.classList.remove('hidden', 'bg-green-100', 'text-green-800', 'bg-red-100', 'text-red-800');
@@ -72,9 +79,9 @@
                 setTimeout(() => messageBox.classList.add('hidden'), 5000);
             };
 
-            // دالة لجلب البيانات من Firebase
+            // Function to fetch data from the original subscriptions path
             function fetchSubscriptions() {
-                const subsRef = ref(db, `data/${appId}/subscriptions`);
+                const subsRef = ref(db, `subscriptions`);
                 onValue(subsRef, (snapshot) => {
                     try {
                         const data = snapshot.val();
@@ -86,17 +93,17 @@
                                 totalIncome += Number(data[key].amount || 0);
                             });
                         }
-                        // عرض إجمالي الدخل الحالي
+                        // Display total income
                         totalIncomeEl.textContent = `${totalIncome.toFixed(2)} جنيه`;
                         renderSubscriptions();
                     } catch (error) {
-                        console.error('خطأ في جلب البيانات:', error);
-                        showMessage('حدث خطأ أثناء جلب البيانات. تأكد من إعدادات Firebase.', 'error');
+                        console.error('Error fetching data:', error);
+                        showMessage('An error occurred while fetching data. Check your Firebase settings.', 'error');
                     }
                 });
             }
 
-            // دالة لحساب الدخل لفترة معينة
+            // Function to calculate income for a specific period
             calculateIncomeBtn.addEventListener('click', () => {
                 const startDateInput = document.getElementById('start-date-income');
                 const endDateInput = document.getElementById('end-date-income');
@@ -104,18 +111,16 @@
                 const endDate = new Date(endDateInput.value);
 
                 if (!startDateInput.value || !endDateInput.value || startDate > endDate) {
-                    showMessage('يرجى تحديد فترة زمنية صحيحة.', 'error');
+                    showMessage('Please select a valid time period.', 'error');
                     return;
                 }
 
                 let periodIncome = 0;
                 subscriptions.forEach(sub => {
-                    // نحسب الدخل من الاشتراك الحالي
                     const subStartDate = new Date(sub.startDate);
                     if (subStartDate >= startDate && subStartDate <= endDate) {
                         periodIncome += Number(sub.amount || 0);
                     }
-                    // نحسب الدخل من الاشتراكات السابقة في السجل
                     if (sub.history && Array.isArray(sub.history)) {
                         sub.history.forEach(hist => {
                             const histStartDate = new Date(hist.startDate);
@@ -128,7 +133,7 @@
                 incomePeriodEl.textContent = `${periodIncome.toFixed(2)} جنيه`;
             });
 
-            // دالة لعرض الاشتراكات مع التصفية والبحث
+            // Function to render subscriptions with filtering and searching
             function renderSubscriptions() {
                 subscriptionsList.innerHTML = '';
                 const searchTerm = searchInput.value.toLowerCase();
@@ -184,7 +189,7 @@
                     card.innerHTML = `
                         <div class="flex justify-between items-start mb-2">
                             <h3 class="font-semibold text-lg text-gray-800">${sub.name || 'غير معروف'}</h3>
-                            <div class="flex items-center space-x-2 space-x-reverse">
+                            <div class="flex items-center space-x-4 space-x-reverse">
                                 <span class="px-2 py-1 rounded-full text-white text-xs font-bold ${statusClass}">${statusText}</span>
                                 <button class="edit-btn text-blue-500 hover:text-blue-700 transition-colors" data-id="${sub.id}" title="تجديد/تعديل">
                                     <i class="fas fa-edit"></i>
@@ -204,7 +209,7 @@
                     subscriptionsList.appendChild(card);
                 });
 
-                // إضافة معالجات الأحداث للأزرار الجديدة
+                // Add event listeners for new buttons
                 document.querySelectorAll('.edit-btn').forEach(btn => {
                     btn.addEventListener('click', (e) => {
                         e.stopPropagation();
@@ -221,7 +226,7 @@
                 });
             }
 
-            // معالجة إرسال نموذج إضافة اشتراك جديد
+            // Handle adding a new subscription
             form.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 submitBtn.disabled = true;
@@ -238,7 +243,7 @@
                 };
 
                 if (new Date(newSubscription.endDate) < new Date(newSubscription.startDate)) {
-                    showMessage('تاريخ النهاية يجب أن يكون بعد تاريخ البداية.', 'error');
+                    showMessage('End date must be after the start date.', 'error');
                     submitBtn.disabled = false;
                     submitBtn.classList.remove('loading');
                     submitBtn.querySelector('i').classList.remove('hidden');
@@ -246,12 +251,13 @@
                 }
 
                 try {
-                    await push(ref(db, `data/${appId}/subscriptions`), newSubscription);
-                    showMessage('تم إضافة الاشتراك بنجاح!');
+                    // Push to the same original 'subscriptions' path
+                    await push(ref(db, `subscriptions`), newSubscription);
+                    showMessage('Subscription added successfully!');
                     form.reset();
                 } catch (error) {
-                    console.error('خطأ في إضافة الاشتراك:', error);
-                    showMessage('فشل في إضافة الاشتراك. تأكد من إعدادات Firebase.', 'error');
+                    console.error('Error adding subscription:', error);
+                    showMessage('Failed to add subscription. Check your Firebase settings.', 'error');
                 } finally {
                     submitBtn.disabled = false;
                     submitBtn.classList.remove('loading');
@@ -259,9 +265,9 @@
                 }
             });
 
-            // فتح نافذة التعديل
+            // Open the edit modal
             async function openEditModal(subId) {
-                const subRef = ref(db, `data/${appId}/subscriptions/${subId}`);
+                const subRef = ref(db, `subscriptions/${subId}`);
                 try {
                     const snapshot = await get(subRef);
                     if (snapshot.exists()) {
@@ -271,17 +277,15 @@
                         document.getElementById('edit-phone-number').value = sub.phone || '';
                         document.getElementById('edit-telegram-username').value = sub.telegram || '';
                         document.getElementById('edit-amount').value = sub.amount || 0;
-                        document.getElementById('edit-start-date').value = sub.startDate || '';
                         document.getElementById('edit-end-date').value = sub.endDate || '';
                         
-                        // عرض سجل الاشتراكات السابقة
                         const historyList = document.getElementById('history-list');
                         historyList.innerHTML = '';
                         if (sub.history && Array.isArray(sub.history) && sub.history.length > 0) {
                             sub.history.forEach((hist, index) => {
                                 const li = document.createElement('li');
                                 li.className = 'border-b last:border-0 py-2';
-                                li.innerHTML = `<p class="text-xs text-gray-500 mb-1">الاشتراك السابق #${index + 1}</p>
+                                li.innerHTML = `<p class="text-xs text-gray-500 mb-1">Previous Subscription #${index + 1}</p>
                                                 <p><i class="fas fa-money-bill-wave ml-1"></i> ${hist.amount} جنيه</p>
                                                 <p><i class="far fa-calendar-alt ml-1"></i> ${new Date(hist.startDate).toLocaleDateString('ar-EG')} - ${new Date(hist.endDate).toLocaleDateString('ar-EG')}</p>`;
                                 historyList.appendChild(li);
@@ -293,15 +297,15 @@
 
                         modal.classList.remove('hidden');
                     } else {
-                        showMessage('الاشتراك غير موجود.', 'error');
+                        showMessage('Subscription not found.', 'error');
                     }
                 } catch (error) {
-                    console.error('خطأ في جلب بيانات الاشتراك:', error);
-                    showMessage('حدث خطأ أثناء جلب بيانات الاشتراك.', 'error');
+                    console.error('Error fetching subscription data:', error);
+                    showMessage('An error occurred while fetching subscription data.', 'error');
                 }
             }
 
-            // معالجة إرسال نموذج التعديل (التجديد)
+            // Handle edit/renew form submission
             editForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 const editBtn = document.getElementById('edit-submit-btn');
@@ -310,7 +314,7 @@
                 editBtn.querySelector('i').classList.add('hidden');
 
                 const subId = document.getElementById('edit-id').value;
-                const subRef = ref(db, `data/${appId}/subscriptions/${subId}`);
+                const subRef = ref(db, `subscriptions/${subId}`);
                 
                 const currentSub = (await get(subRef)).val();
                 
@@ -318,15 +322,14 @@
                 const newAmount = parseFloat(document.getElementById('edit-amount').value);
 
                 if (new Date(newEndDate) < new Date(currentSub.endDate)) {
-                    showMessage('تاريخ الانتهاء الجديد يجب أن يكون بعد تاريخ الانتهاء الحالي.', 'error');
+                    showMessage('The new end date must be after the current end date.', 'error');
                     editBtn.disabled = false;
                     editBtn.classList.remove('loading');
                     editBtn.querySelector('i').classList.remove('hidden');
                     return;
                 }
-
+                
                 try {
-                    // إضافة الاشتراك الحالي إلى سجل التاريخ
                     const updatedHistory = currentSub.history || [];
                     updatedHistory.push({
                         amount: currentSub.amount,
@@ -334,19 +337,19 @@
                         endDate: currentSub.endDate
                     });
 
-                    // تحديث بيانات الاشتراك
                     await set(subRef, {
                         ...currentSub,
                         amount: newAmount,
+                        startDate: new Date().toISOString().slice(0, 10), // Use today's date as new start date
                         endDate: newEndDate,
                         history: updatedHistory
                     });
 
-                    showMessage('تم تجديد الاشتراك بنجاح!');
+                    showMessage('Subscription renewed successfully!');
                     modal.classList.add('hidden');
                 } catch (error) {
-                    console.error('خطأ في تجديد الاشتراك:', error);
-                    showMessage('فشل في تجديد الاشتراك.', 'error');
+                    console.error('Error renewing subscription:', error);
+                    showMessage('Failed to renew subscription.', 'error');
                 } finally {
                     editBtn.disabled = false;
                     editBtn.classList.remove('loading');
@@ -354,7 +357,7 @@
                 }
             });
 
-            // دالة لعرض نافذة تأكيد الحذف
+            // Show delete confirmation modal
             function showConfirmationModal(subId) {
                 const modal = document.getElementById('confirmation-modal');
                 const confirmBtn = document.getElementById('confirm-delete-btn');
@@ -370,18 +373,18 @@
                 };
             }
 
-            // دالة لحذف اشتراك
+            // Delete a subscription
             async function deleteSubscription(subId) {
                 try {
-                    await remove(ref(db, `data/${appId}/subscriptions/${subId}`));
-                    showMessage('تم حذف الاشتراك بنجاح.');
+                    await remove(ref(db, `subscriptions/${subId}`));
+                    showMessage('Subscription deleted successfully.');
                 } catch (error) {
-                    console.error('خطأ في حذف الاشتراك:', error);
-                    showMessage('فشل في حذف الاشتراك.', 'error');
+                    console.error('Error deleting subscription:', error);
+                    showMessage('Failed to delete subscription.', 'error');
                 }
             }
             
-            // معالجة البحث وتغيير الفلتر
+            // Event listeners
             searchInput.addEventListener('input', renderSubscriptions);
             hideExpiredCheckbox.addEventListener('change', renderSubscriptions);
             filterButtons.forEach(button => {
@@ -391,16 +394,15 @@
                     renderSubscriptions();
                 });
             });
-
-            // إغلاق النافذة المنبثقة
             closeModalBtn.addEventListener('click', () => {
                 modal.classList.add('hidden');
             });
-
-            // جلب البيانات عند بدء تشغيل التطبيق
+            
+            // Fetch data on app load
             fetchSubscriptions();
         }
-
+        
+        // Start the authentication process
         authenticate();
     </script>
     <style>
@@ -457,6 +459,9 @@
             <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-2">إدارة اشتراكات قناة التليجرام</h1>
             <p class="text-gray-600">أضف، تتبع، وابحث عن اشتراكات أعضاء قناتك.</p>
         </header>
+
+        <!-- User ID for Collaboration -->
+        <p id="user-id-display" class="text-sm text-gray-500 text-center mb-4"></p>
         
         <!-- Analytics Section -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
